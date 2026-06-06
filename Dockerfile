@@ -8,9 +8,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY server.py .
 COPY vm2026.html .
 
-# SQLite-databasen sparas här (Railway: mount en persistent volym på /app/data)
-VOLUME ["/app/data"]
-
 EXPOSE 8000
 
 CMD uvicorn server:app --host 0.0.0.0 --port ${PORT:-8000}
