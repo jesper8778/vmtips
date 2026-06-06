@@ -1,10 +1,11 @@
 import json
 import os
 import io
-import sqlite3
 from fastapi import FastAPI, UploadFile, Form, HTTPException, Header
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+import psycopg2
+import psycopg2.extras
 import xlrd
 import openpyxl
 
@@ -17,8 +18,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-DATA_DIR = os.environ.get("DATA_DIR", ".")
-DB_FILE = os.path.join(DATA_DIR, "participants.db")
+DATABASE_URL = os.environ.get("DATABASE_URL")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "vm2026")
 
 JESPER_TIPS = {1:{"home":2,"away":0},2:{"home":1,"away":0},3:{"home":2,"away":0},4:{"home":2,"away":1},5:{"home":0,"away":2},6:{"home":2,"away":0},7:{"home":0,"away":2},8:{"home":0,"away":1},9:{"home":4,"away":0},10:{"home":2,"away":0},11:{"home":0,"away":1},12:{"home":2,"away":1},13:{"home":4,"away":0},14:{"home":2,"away":1},15:{"home":0,"away":2},16:{"home":2,"away":1},17:{"home":2,"away":1},18:{"home":0,"away":2},19:{"home":2,"away":0},20:{"home":2,"away":0},21:{"home":3,"away":0},22:{"home":2,"away":0},23:{"home":1,"away":0},24:{"home":0,"away":2},25:{"home":1,"away":0},26:{"home":2,"away":0},27:{"home":3,"away":0},28:{"home":2,"away":0},29:{"home":1,"away":0},30:{"home":0,"away":1},31:{"home":3,"away":0},32:{"home":1,"away":1},33:{"home":2,"away":0},34:{"home":2,"away":0},35:{"home":2,"away":0},36:{"home":0,"away":2},37:{"home":4,"away":0},38:{"home":2,"away":0},39:{"home":4,"away":0},40:{"home":0,"away":2},41:{"home":2,"away":0},42:{"home":3,"away":0},43:{"home":1,"away":1},44:{"home":1,"away":1},45:{"home":4,"away":0},46:{"home":3,"away":0},47:{"home":0,"away":3},48:{"home":2,"away":0},49:{"home":1,"away":1},50:{"home":2,"away":1},51:{"home":0,"away":3},52:{"home":3,"away":0},53:{"home":0,"away":2},54:{"home":1,"away":1},55:{"home":0,"away":4},56:{"home":0,"away":3},57:{"home":1,"away":1},58:{"home":0,"away":3},59:{"home":1,"away":2},60:{"home":1,"away":1},61:{"home":1,"away":2},62:{"home":3,"away":0},63:{"home":0,"away":1},64:{"home":0,"away":2},65:{"home":1,"away":1},66:{"home":0,"away":2},67:{"home":0,"away":3},68:{"home":2,"away":0},69:{"home":0,"away":2},70:{"home":1,"away":1},71:{"home":0,"away":1},72:{"home":0,"away":3}}
@@ -27,29 +27,29 @@ JESPER_TIPS = {1:{"home":2,"away":0},2:{"home":1,"away":0},3:{"home":2,"away":0}
 # ── Database ───────────────────────────────────────────────────────────────────
 
 def get_db():
-    conn = sqlite3.connect(DB_FILE)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return psycopg2.connect(DATABASE_URL)
 
 
 def init_db():
-    os.makedirs(DATA_DIR, exist_ok=True)
     conn = get_db()
-    conn.execute("""
+    cur = conn.cursor()
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS participants (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             name TEXT UNIQUE NOT NULL,
-            tips TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            tips JSONB NOT NULL,
+            created_at TIMESTAMP DEFAULT NOW()
         )
     """)
+    cur.execute("SELECT COUNT(*) FROM participants")
+    if cur.fetchone()[0] == 0:
+        tips = {str(k): v for k, v in JESPER_TIPS.items()}
+        cur.execute(
+            "INSERT INTO participants (name, tips) VALUES (%s, %s)",
+            ("Jesper", json.dumps(tips))
+        )
     conn.commit()
-    # Seed Jesper if table is empty
-    count = conn.execute("SELECT COUNT(*) FROM participants").fetchone()[0]
-    if count == 0:
-        tips_json = json.dumps({str(k): v for k, v in JESPER_TIPS.items()})
-        conn.execute("INSERT INTO participants (name, tips) VALUES (?, ?)", ("Jesper", tips_json))
-        conn.commit()
+    cur.close()
     conn.close()
 
 
@@ -58,9 +58,12 @@ init_db()
 
 def load_data():
     conn = get_db()
-    rows = conn.execute("SELECT name, tips FROM participants ORDER BY id").fetchall()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT name, tips FROM participants ORDER BY id")
+    rows = cur.fetchall()
+    cur.close()
     conn.close()
-    return [{"name": r["name"], "tips": json.loads(r["tips"])} for r in rows]
+    return [{"name": r["name"], "tips": r["tips"]} for r in rows]
 
 
 # ── Excel parsing ──────────────────────────────────────────────────────────────
@@ -140,17 +143,26 @@ async def add_participant(name: str = Form(...), file: UploadFile = Form(...)):
     if len(tips) == 0:
         raise HTTPException(400, "Hittade inga tips i filen. Kontrollera att mål är ifyllda i kolumn G/H (match 1-36) och T/U (match 37-72).")
 
-    tips_json = json.dumps(tips)
     conn = get_db()
-    existing = conn.execute("SELECT id FROM participants WHERE LOWER(name) = LOWER(?)", (name,)).fetchone()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM participants WHERE LOWER(name) = LOWER(%s)", (name,))
+    existing = cur.fetchone()
     if existing:
-        conn.execute("UPDATE participants SET tips = ? WHERE LOWER(name) = LOWER(?)", (tips_json, name))
+        cur.execute(
+            "UPDATE participants SET tips = %s WHERE LOWER(name) = LOWER(%s)",
+            (json.dumps(tips), name)
+        )
         conn.commit()
+        cur.close()
         conn.close()
         return {"ok": True, "count": len(tips), "updated": True}
 
-    conn.execute("INSERT INTO participants (name, tips) VALUES (?, ?)", (name, tips_json))
+    cur.execute(
+        "INSERT INTO participants (name, tips) VALUES (%s, %s)",
+        (name, json.dumps(tips))
+    )
     conn.commit()
+    cur.close()
     conn.close()
     return {"ok": True, "count": len(tips), "updated": False}
 
@@ -160,16 +172,19 @@ def delete_participant(name: str, x_admin_password: str = Header(default="")):
     if x_admin_password != ADMIN_PASSWORD:
         raise HTTPException(401, "Fel lösenord")
     conn = get_db()
-    row = conn.execute(
-        "SELECT id FROM participants WHERE LOWER(name) = LOWER(?)", (name,)
-    ).fetchone()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM participants WHERE LOWER(name) = LOWER(%s)", (name,))
+    row = cur.fetchone()
     if not row:
+        cur.close()
         conn.close()
         raise HTTPException(404, "Deltagare hittades inte")
-    if row["id"] == 1:
+    if row[0] == 1:
+        cur.close()
         conn.close()
         raise HTTPException(403, "Kan inte ta bort administratören")
-    conn.execute("DELETE FROM participants WHERE id = ?", (row["id"],))
+    cur.execute("DELETE FROM participants WHERE id = %s", (row[0],))
     conn.commit()
+    cur.close()
     conn.close()
     return {"ok": True}
