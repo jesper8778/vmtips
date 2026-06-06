@@ -1,0 +1,9 @@
+participants.json
+participants.db
+*.db
+data/
+__pycache__/
+*.pyc
+.env
+xlsx.min.js
+VM Tipset 2026 Blankett IFYLLT.xls

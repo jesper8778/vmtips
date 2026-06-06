@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VM 2026 Tipset</title>
+<script>
+// Load SheetJS – try local first, fall back to CDN
+(function() {
+  function loadCDN() {
+    var s = document.createElement('script');
+    s.src = 'https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js';
+    s.onerror = function() {
+      document.getElementById('xlsx-status') && (document.getElementById('xlsx-status').textContent = '⚠️ Excel-stöd ej tillgängligt — kontrollera internet');
+    };
+    document.head.appendChild(s);
+  }
+  var s = document.createElement('script');
+  s.src = 'xlsx.min.js';
+  s.onload = function() { window._xlsxLoaded = true; };
+  s.onerror = function() { loadCDN(); };
+  document.head.appendChild(s);
+})();
+</script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #0a1628; --panel: #0d1f3c; --border: #1e3a5f;
+  --text: #e2e8f0; --muted: #4a6a99; --blue: #60a5fa;
+  --green: #4ade80; --yellow: #fbbf24; --orange: #f97316;
+  --red: #ef4444; --gold: #fbbf24; --silver: #94a3b8;
+}
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+/* HEADER */
+.header { background: var(--panel); border-bottom: 1px solid var(--border); padding: 14px 20px; display: flex; align-items: center; gap: 12px; position: sticky; top: 0; z-index: 100; }
+.header-logo { font-size: 24px; }
+.header-text h1 { font-size: 16px; font-weight: 800; }
+.header-text p { font-size: 11px; color: var(--muted); margin-top: 1px; }
+.header-status { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }
+.live-dot { width: 7px; height: 7px; background: var(--green); border-radius: 50%; animation: pulse 1.5s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+.refresh-btn { background: var(--border); border: none; color: var(--blue); font-size: 11px; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-weight: 600; }
+.refresh-btn:hover { background: #2a4a7f; }
+
+/* TABS */
+.tabs { background: var(--panel); border-bottom: 1px solid var(--border); display: flex; padding: 0 20px; gap: 4px; }
+.tab { padding: 10px 16px; font-size: 12px; font-weight: 700; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; transition: all .15s; }
+.tab.active { color: var(--blue); border-bottom-color: var(--blue); }
+.tab:hover:not(.active) { color: #93c5fd; }
+
+/* CONTENT */
+.content { padding: 16px 20px; max-width: 980px; margin: 0 auto; }
+.view { display: none; }
+.view.active { display: block; }
+.section-label { font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
+
+/* SUMMARY STATS */
+.stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 14px; }
+.stat-box { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; text-align: center; }
+.stat-val { font-size: 22px; font-weight: 900; }
+.stat-val.blue { color: var(--blue); }
+.stat-val.green { color: var(--green); }
+.stat-val.yellow { color: var(--yellow); }
+.stat-val.muted { color: var(--muted); }
+.stat-lab { font-size: 10px; color: var(--muted); margin-top: 2px; }
+
+/* LEADERBOARD */
+.lb { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.lb-head { display: grid; grid-template-columns: 40px 1fr 64px 52px 52px 52px; padding: 8px 14px; border-bottom: 1px solid var(--border); background: #081420; gap: 6px; }
+.lb-head span { font-size: 10px; font-weight: 700; color: #3a5a80; text-transform: uppercase; }
+.lb-row { display: grid; grid-template-columns: 40px 1fr 64px 52px 52px 52px; padding: 11px 14px; border-bottom: 1px solid #0f1e33; align-items: center; gap: 6px; transition: background .1s; }
+.lb-row:last-child { border-bottom: none; }
+.lb-row:hover { background: #0f2040; }
+.lb-row.rank-1 { background: linear-gradient(90deg, rgba(251,191,36,.08), transparent 60%); }
+.lb-row.rank-2 { background: linear-gradient(90deg, rgba(148,163,184,.05), transparent 60%); }
+.lb-row.rank-3 { background: linear-gradient(90deg, rgba(180,100,40,.07), transparent 60%); }
+.rank { font-size: 15px; font-weight: 900; text-align: center; }
+.r1 { color: var(--gold); }
+.r2 { color: var(--silver); }
+.r3 { color: #b46328; }
+.rn { color: var(--muted); }
+.lb-name { font-size: 14px; font-weight: 700; color: var(--text); cursor: pointer; }
+.lb-name:hover { color: var(--blue); }
+.lb-pts { font-size: 17px; font-weight: 900; color: var(--blue); text-align: right; }
+.lb-exact { font-size: 13px; font-weight: 700; color: var(--green); text-align: center; }
+.lb-sign { font-size: 13px; font-weight: 700; color: var(--yellow); text-align: center; }
+.lb-trend { font-size: 11px; text-align: center; color: var(--muted); }
+
+/* MATCH LIST */
+.filter-row { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; align-items: center; }
+.filter-btn { padding: 5px 10px; border-radius: 16px; border: 1px solid var(--border); background: transparent; color: var(--muted); font-size: 11px; font-weight: 700; cursor: pointer; transition: all .15s; }
+.filter-btn.active { background: #1e3a7f; border-color: var(--blue); color: var(--blue); }
+.filter-btn:hover:not(.active) { border-color: var(--blue); color: #93c5fd; }
+.participant-filter { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.participant-filter label { font-size: 11px; color: var(--muted); }
+.participant-filter select { background: var(--panel); border: 1px solid var(--border); color: var(--text); font-size: 11px; padding: 4px 8px; border-radius: 6px; max-width: 120px; }
+
+.match-list { display: flex; flex-direction: column; gap: 6px; }
+.match-card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; display: grid; grid-template-columns: 28px 1fr 76px 76px 38px; align-items: center; gap: 8px; border-left: 3px solid var(--border); transition: background .1s; }
+.match-card:hover { background: #0f2040; }
+.match-card.status-done { border-left-color: var(--green); }
+.match-card.status-live { border-left-color: var(--orange); }
+.match-card.status-upcoming { border-left-color: #1e3a5f; }
+.match-num { font-size: 10px; font-weight: 800; color: var(--muted); text-align: center; }
+.match-info .teams { font-size: 12px; font-weight: 700; color: var(--text); }
+.match-info .meta { font-size: 10px; color: var(--muted); margin-top: 2px; }
+.match-info .meta .live-tag { color: var(--orange); font-weight: 700; }
+.match-info .meta .time-tag { color: var(--blue); font-weight: 700; }
+.score-box { text-align: center; }
+.score-val { font-size: 16px; font-weight: 900; }
+.score-label { font-size: 9px; color: var(--muted); margin-top: 1px; text-transform: uppercase; letter-spacing: .05em; }
+.tip-val { font-size: 16px; font-weight: 900; }
+.tip-exact { color: var(--green); }
+.tip-sign { color: var(--yellow); }
+.tip-wrong { color: var(--red); }
+.tip-pending { color: var(--muted); }
+.pts-badge { text-align: center; }
+.pts-pill { display: inline-block; font-size: 11px; font-weight: 800; padding: 3px 7px; border-radius: 6px; }
+.pts-3 { background: rgba(74,222,128,.15); color: var(--green); border: 1px solid rgba(74,222,128,.3); }
+.pts-1 { background: rgba(251,191,36,.15); color: var(--yellow); border: 1px solid rgba(251,191,36,.3); }
+.pts-0 { background: rgba(239,68,68,.1); color: #7a3030; border: 1px solid #3a1a1a; }
+.pts-pending { background: transparent; color: var(--muted); border: 1px solid #1e3a5f; }
+
+/* PARTICIPANT VIEW */
+.p-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
+.p-tab { padding: 6px 12px; border-radius: 20px; border: 1px solid var(--border); background: transparent; color: var(--muted); font-size: 12px; font-weight: 700; cursor: pointer; transition: all .15s; }
+.p-tab.active { background: #1e3a7f; border-color: var(--blue); color: #fff; }
+.p-tab:hover:not(.active) { border-color: var(--blue); color: #93c5fd; }
+
+.p-stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 16px; }
+
+.mini-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+@media(min-width:700px) { .mini-grid { grid-template-columns: repeat(3, 1fr); } }
+.mini-card { background: var(--panel); border: 1px solid var(--border); border-radius: 7px; padding: 8px 10px; display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.mini-match-num { font-size: 10px; color: var(--muted); font-weight: 800; min-width: 18px; }
+.mini-teams { font-size: 10px; color: #94a3b8; flex: 1; line-height: 1.3; }
+.mini-tip { font-size: 12px; font-weight: 800; white-space: nowrap; }
+.mini-pts { font-size: 9px; font-weight: 800; margin-left: 4px; }
+
+/* ── MOBILE ────────────────────────────────────────────── */
+@media (max-width: 600px) {
+  .content { padding: 10px 12px; }
+  .header { padding: 10px 12px; }
+  .header-text h1 { font-size: 14px; }
+  .header-text p { display: none; }
+  .header-status span { display: none; }
+
+  /* Stats: 2×2 */
+  .stats-row { grid-template-columns: repeat(2, 1fr); }
+  .p-stats { grid-template-columns: repeat(2, 1fr); }
+
+  /* Leaderboard: hide Tecken column */
+  .lb-head { grid-template-columns: 32px 1fr 52px 40px 52px; }
+  .lb-row  { grid-template-columns: 32px 1fr 52px 40px 52px; }
+  .lb-head span:nth-child(5),
+  .lb-row > *:nth-child(5) { display: none; }
+  .lb-pts { font-size: 14px; }
+  .lb-name { font-size: 12px; }
+
+  /* Match cards: stacked layout */
+  .match-card {
+    grid-template-columns: 24px 1fr 60px 60px 32px;
+    padding: 8px 10px;
+    gap: 6px;
+  }
+  .score-val, .tip-val { font-size: 14px; }
+  .match-info .teams { font-size: 11px; }
+
+  /* Tabs: smaller text */
+  .tab { padding: 8px 10px; font-size: 11px; }
+  .tabs { padding: 0 12px; }
+
+  /* Filter row: wrap tightly */
+  .participant-filter { margin-left: 0; width: 100%; }
+  .participant-filter select { max-width: 100%; flex: 1; }
+}
+
+/* ADD PARTICIPANT */
+.add-section { background: var(--panel); border: 1px dashed var(--border); border-radius: 10px; padding: 20px; margin-top: 16px; text-align: center; }
+.add-title { font-size: 14px; font-weight: 700; margin-bottom: 8px; }
+.add-desc { font-size: 12px; color: var(--muted); margin-bottom: 14px; }
+.add-textarea { width: 100%; background: #081420; border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 11px; padding: 10px; font-family: monospace; resize: vertical; min-height: 80px; }
+.add-btn { margin-top: 8px; background: #1e40af; color: #fff; border: none; padding: 8px 18px; border-radius: 7px; font-size: 12px; font-weight: 700; cursor: pointer; }
+.add-btn:hover { background: #2563eb; }
+.error-msg { color: var(--red); font-size: 11px; margin-top: 6px; }
+
+/* SPINNER */
+.spinner { display: flex; align-items: center; justify-content: center; padding: 40px; color: var(--muted); font-size: 13px; gap: 10px; }
+
+/* NOTIFICATION */
+.notif { position: fixed; bottom: 20px; right: 20px; background: #16a34a; color: #fff; padding: 10px 16px; border-radius: 8px; font-size: 13px; font-weight: 600; z-index: 999; opacity: 0; transform: translateY(10px); transition: all .3s; pointer-events: none; }
+.notif.show { opacity: 1; transform: translateY(0); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-logo">⚽</div>
+  <div class="header-text">
+    <h1>VM 2026 Tipset</h1>
+    <p>Gruppspel · 72 matcher · USA/Kanada/Mexiko</p>
+  </div>
+  <div class="header-status">
+    <div class="live-dot"></div>
+    <span id="api-status">Hämtar resultat…</span>
+    <button class="refresh-btn" onclick="loadResults()">↻ Uppdatera</button>
+  </div>
+</div>
+
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('topplista')">🏆 Topplista</div>
+  <div class="tab" onclick="switchTab('matcher')">📋 Matcher</div>
+  <div class="tab" onclick="switchTab('deltagare')">👤 Deltagare</div>
+</div>
+
+<div class="content">
+
+  <!-- TOPPLISTA -->
+  <div class="view active" id="view-topplista">
+    <div class="stats-row" id="top-stats"></div>
+    <div class="section-label">Ställning</div>
+    <div class="lb">
+      <div class="lb-head">
+        <span>#</span><span>Deltagare</span><span style="text-align:right">Poäng</span>
+        <span style="text-align:center">✓ Rätt</span><span style="text-align:center">~ Tecken</span><span style="text-align:center">Matcher</span>
+      </div>
+      <div id="leaderboard-body"></div>
+    </div>
+  </div>
+
+  <!-- MATCHER -->
+  <div class="view" id="view-matcher">
+    <div class="filter-row">
+      <button class="filter-btn active" onclick="setFilter('alla',this)">Alla</button>
+      <button class="filter-btn" onclick="setFilter('spelade',this)">Spelade</button>
+      <button class="filter-btn" onclick="setFilter('live',this)">Live</button>
+      <button class="filter-btn" onclick="setFilter('kommande',this)">Kommande</button>
+      <div class="participant-filter">
+        <label>Tips för:</label>
+        <select id="match-participant-select" onchange="renderMatches()"></select>
+      </div>
+    </div>
+    <div class="match-list" id="match-list"></div>
+  </div>
+
+  <!-- DELTAGARE -->
+  <div class="view" id="view-deltagare">
+    <div class="p-tabs" id="p-tabs"></div>
+    <div class="stats-row p-stats" id="p-stats"></div>
+    <div class="section-label">Alla 72 tips</div>
+    <div class="mini-grid" id="mini-grid"></div>
+    <div class="add-section">
+      <div class="add-title">➕ Lägg till deltagare</div>
+      <div class="add-desc">Ladda upp deltagarens ifyllda Excel-blankett (.xls eller .xlsx)</div>
+      <span id="xlsx-status" style="font-size:10px;color:var(--muted)"></span>
+      <input type="text" placeholder="Namn på deltagaren" id="new-name" style="width:100%;background:#081420;border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 10px;font-size:12px;margin-bottom:8px;margin-top:6px;">
+      <label id="drop-zone" for="excel-input" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;background:#081420;border:2px dashed var(--border);border-radius:8px;padding:24px;cursor:pointer;transition:border-color .15s;">
+        <span style="font-size:28px">📂</span>
+        <span style="font-size:12px;color:var(--muted)" id="drop-label">Klicka eller dra hit Excel-filen</span>
+      </label>
+      <input type="file" id="excel-input" accept=".xls,.xlsx" style="display:none">
+      <div style="margin-top:10px;display:flex;gap:8px;align-items:center;">
+        <button class="add-btn" onclick="addFromExcel()" id="add-excel-btn">Lägg till</button>
+        <span style="font-size:11px;color:var(--muted)" id="excel-preview"></span>
+      </div>
+      <div class="error-msg" id="add-error"></div>
+    </div>
+  </div>
+
+</div>
+<div class="notif" id="notif"></div>
+
+<script>
+// ─── TIPS DATA ──────────────────────────────────────────────────────────────
+const JESPER_TIPS = [{"match":1,"teams":"Mexcio - Sydafrika","group":"A","date":"11/6","time":"21:00","tv":"TV4","tip_home":2,"tip_away":0},{"match":2,"teams":"Sydkorea - Tjeckien","group":"A","date":"12/6","time":"04:00","tv":"TV4","tip_home":1,"tip_away":0},{"match":3,"teams":"Kanada - Bosnien/Hercogovina","group":"B","date":"12/6","time":"21:00","tv":"SVT","tip_home":2,"tip_away":0},{"match":4,"teams":"USA - Paraguay","group":"D","date":"13/6","time":"03:00","tv":"TV4","tip_home":2,"tip_away":1},{"match":5,"teams":"Qatar - Schweiz","group":"B","date":"13/6","time":"21:00","tv":"TV4","tip_home":0,"tip_away":2},{"match":6,"teams":"Brasilien - Marocko","group":"C","date":"14/6","time":"00:00","tv":"TV4","tip_home":2,"tip_away":0},{"match":7,"teams":"Haiti - Skottland","group":"C","date":"14/6","time":"03:00","tv":"SVT","tip_home":0,"tip_away":2},{"match":8,"teams":"Australien - Turkiet","group":"D","date":"14/6","time":"06:00","tv":"TV4","tip_home":0,"tip_away":1},{"match":9,"teams":"Tyskland - Curacao","group":"E","date":"15/6","time":"19:00","tv":"TV4","tip_home":4,"tip_away":0},{"match":10,"teams":"Nederländerna - Japan","group":"F","date":"15/6","time":"22:00","tv":"TV4","tip_home":2,"tip_away":0},{"match":11,"teams":"Elfenbenskusten - Ecuador","group":"E","date":"15/6","time":"01:00","tv":"TV4","tip_home":0,"tip_away":1},{"match":12,"teams":"Sverige - Tunisien","group":"F","date":"15/6","time":"04:00","tv":"SVT","tip_home":2,"tip_away":1},{"match":13,"teams":"Spanien - Kap Verde","group":"H","date":"16/6","time":"18:00","tv":"SVT","tip_home":4,"tip_away":0},{"match":14,"teams":"Belgien - Egypten","group":"G","date":"16/6","time":"21:00","tv":"SVT","tip_home":2,"tip_away":1},{"match":15,"teams":"Saudiarabien - Uruguay","group":"H","date":"16/6","time":"00:00","tv":"TV4","tip_home":0,"tip_away":2},{"match":16,"teams":"Iran - Nya Zeeland","group":"G","date":"16/6","time":"03:00","tv":"TV4","tip_home":2,"tip_away":1},{"match":17,"teams":"Frankrike - Senegal","group":"I","date":"17/6","time":"21:00","tv":"SVT","tip_home":2,"tip_away":1},{"match":18,"teams":"Irak - Norge","group":"I","date":"17/6","time":"00:00","tv":"TV4","tip_home":0,"tip_away":2},{"match":19,"teams":"Argentina - Algeriet","group":"J","date":"17/6","time":"03:00","tv":"TV4","tip_home":2,"tip_away":0},{"match":20,"teams":"Österrike - Jordanien","group":"J","date":"17/6","time":"06:00","tv":"TV4","tip_home":2,"tip_away":0},{"match":21,"teams":"Portugal - DR Kongo","group":"K","date":"18/6","time":"19:00","tv":"TV4","tip_home":3,"tip_away":0},{"match":22,"teams":"England - Kroatien","group":"L","date":"18/6","time":"22:00","tv":"TV4","tip_home":2,"tip_away":0},{"match":23,"teams":"Ghana - Panama","group":"L","date":"18/6","time":"01:00","tv":"TV4","tip_home":1,"tip_away":0},{"match":24,"teams":"Uzbekistan - Colombia","group":"K","date":"18/6","time":"04:00","tv":"TV4","tip_home":0,"tip_away":2},{"match":25,"teams":"Tjeckien - Sydafrika","group":"A","date":"19/6","time":"18:00","tv":"TV4","tip_home":1,"tip_away":0},{"match":26,"teams":"Schweiz - Bosnien","group":"B","date":"19/6","time":"21:00","tv":"TV4","tip_home":2,"tip_away":0},{"match":27,"teams":"Kanada - Qatar","group":"B","date":"19/6","time":"00:00","tv":"TV4","tip_home":3,"tip_away":0},{"match":28,"teams":"Mexico - Sydkorea","group":"A","date":"19/6","time":"03:00","tv":"TV4","tip_home":2,"tip_away":0},{"match":29,"teams":"USA - Australien","group":"D","date":"20/6","time":"21:00","tv":"SVT","tip_home":1,"tip_away":0},{"match":30,"teams":"Skottland - Marocko","group":"C","date":"20/6","time":"00:00","tv":"SVT","tip_home":0,"tip_away":1},{"match":31,"teams":"Brasilien - Haiti","group":"C","date":"20/6","time":"03:00","tv":"TV4","tip_home":3,"tip_away":0},{"match":32,"teams":"Turkiet - Paraguay","group":"D","date":"20/6","time":"06:00","tv":"TV4","tip_home":1,"tip_away":1},{"match":33,"teams":"Nederländerna - Sverige","group":"F","date":"21/6","time":"19:00","tv":"TV4","tip_home":2,"tip_away":0},{"match":34,"teams":"Tyskland - Elfenbenskusten","group":"E","date":"21/6","time":"22:00","tv":"TV4","tip_home":2,"tip_away":0},{"match":35,"teams":"Ecuador - Curacao","group":"E","date":"21/6","time":"02:00","tv":"TV4","tip_home":2,"tip_away":0},{"match":36,"teams":"Tunisien - Japan","group":"F","date":"21/6","time":"06:00","tv":"SVT","tip_home":0,"tip_away":2},{"match":37,"teams":"Spanien - Saudiarabien","group":"H","date":"21/6","time":"18:00","tv":"TV4","tip_home":4,"tip_away":0},{"match":38,"teams":"Belgien - Iran","group":"G","date":"22/6","time":"21:00","tv":"TV4","tip_home":2,"tip_away":0},{"match":39,"teams":"Uruguay - Kap Verde","group":"H","date":"22/6","time":"00:00","tv":"TV4","tip_home":4,"tip_away":0},{"match":40,"teams":"Nya Zeeland - Egypten","group":"G","date":"22/6","time":"03:00","tv":"TV4","tip_home":0,"tip_away":2},{"match":41,"teams":"Argentina - Österrike","group":"J","date":"22/6","time":"19:00","tv":"SVT","tip_home":2,"tip_away":0},{"match":42,"teams":"Frankrike - Irak","group":"I","date":"22/6","time":"23:00","tv":"SVT","tip_home":3,"tip_away":0},{"match":43,"teams":"Norge - Senegal","group":"I","date":"23/6","time":"02:00","tv":"SVT","tip_home":1,"tip_away":1},{"match":44,"teams":"Jordanien - Algeriet","group":"J","date":"23/6","time":"05:00","tv":"TV4","tip_home":1,"tip_away":1},{"match":45,"teams":"Portugal - Uzbekistan","group":"K","date":"23/6","time":"19:00","tv":"SVT","tip_home":4,"tip_away":0},{"match":46,"teams":"England - Ghana","group":"L","date":"23/6","time":"22:00","tv":"SVT","tip_home":3,"tip_away":0},{"match":47,"teams":"Panama - Kroatien","group":"L","date":"23/6","time":"01:00","tv":"TV4","tip_home":0,"tip_away":3},{"match":48,"teams":"Colombia - DR Kongo","group":"K","date":"23/6","time":"04:00","tv":"SVT","tip_home":2,"tip_away":0},{"match":49,"teams":"Schweiz - Kanada","group":"B","date":"24/6","time":"21:00","tv":"TV4","tip_home":1,"tip_away":1},{"match":50,"teams":"Bosnien - Qatar","group":"B","date":"24/6","time":"21:00","tv":"TV4","tip_home":2,"tip_away":1},{"match":51,"teams":"Skottland - Brasilien","group":"C","date":"24/6","time":"00:00","tv":"TV4","tip_home":0,"tip_away":3},{"match":52,"teams":"Marocko - Haiti","group":"C","date":"24/6","time":"00:00","tv":"TV4","tip_home":3,"tip_away":0},{"match":53,"teams":"Tjeckien - Mexico","group":"A","date":"25/6","time":"03:00","tv":"SVT","tip_home":0,"tip_away":2},{"match":54,"teams":"Sydafrika - Sydkorea","group":"A","date":"25/6","time":"03:00","tv":"SVT","tip_home":1,"tip_away":1},{"match":55,"teams":"Curacao - Elfenbenskusten","group":"E","date":"26/6","time":"22:00","tv":"SVT","tip_home":0,"tip_away":4},{"match":56,"teams":"Ecuador - Tyskland","group":"E","date":"26/6","time":"22:00","tv":"SVT","tip_home":0,"tip_away":3},{"match":57,"teams":"Japan - Sverige","group":"F","date":"26/6","time":"01:00","tv":"SVT","tip_home":1,"tip_away":1},{"match":58,"teams":"Tunisien - Nederländerna","group":"F","date":"26/6","time":"01:00","tv":"SVT","tip_home":0,"tip_away":3},{"match":59,"teams":"Turkiet - USA","group":"D","date":"27/6","time":"04:00","tv":"TV4","tip_home":1,"tip_away":2},{"match":60,"teams":"Paraguay - Australien","group":"D","date":"27/6","time":"04:00","tv":"TV4","tip_home":1,"tip_away":1},{"match":61,"teams":"Norge - Frankrike","group":"I","date":"27/6","time":"21:00","tv":"TV4","tip_home":1,"tip_away":2},{"match":62,"teams":"Senegal - Irak","group":"I","date":"27/6","time":"21:00","tv":"TV4","tip_home":3,"tip_away":0},{"match":63,"teams":"Kap Verde - Saudiarabien","group":"H","date":"27/6","time":"02:00","tv":"TV4","tip_home":0,"tip_away":1},{"match":64,"teams":"Uruguay - Spanien","group":"H","date":"27/6","time":"02:00","tv":"TV4","tip_home":0,"tip_away":2},{"match":65,"teams":"Egypten - Iran","group":"G","date":"28/6","time":"05:00","tv":"TV4","tip_home":1,"tip_away":1},{"match":66,"teams":"Nya Zeeland - Belgien","group":"G","date":"28/6","time":"05:00","tv":"TV4","tip_home":0,"tip_away":2},{"match":67,"teams":"Panama - England","group":"L","date":"28/6","time":"23:00","tv":"SVT","tip_home":0,"tip_away":3},{"match":68,"teams":"Kroatien - Ghana","group":"L","date":"28/6","time":"23:00","tv":"SVT","tip_home":2,"tip_away":0},{"match":69,"teams":"Colombia - Portugal","group":"K","date":"28/6","time":"01:30","tv":"TV4","tip_home":0,"tip_away":2},{"match":70,"teams":"DR Kongo - Uzbekistan","group":"K","date":"28/6","time":"01:30","tv":"TV4","tip_home":1,"tip_away":1},{"match":71,"teams":"Algeriet - Österrike","group":"J","date":"28/6","time":"04:00","tv":"TV4","tip_home":0,"tip_away":1},{"match":72,"teams":"Jordanien - Argentina","group":"J","date":"28/6","time":"04:00","tv":"TV4","tip_home":0,"tip_away":3}];
+
+// ─── STATE ────────────────────────────────────────────────────────────────────
+let participants = [];
+let results = {};
+let matchFilter = 'alla';
+let activeParticipant = 0;
+
+const MATCHES = Object.fromEntries(JESPER_TIPS.map(m => [m.match, m]));
+// Pre-populate match times from Excel data (CEST/Swedish time)
+const matchTimes = Object.fromEntries(JESPER_TIPS.filter(m => m.time).map(m => [m.match, m.time]));
+
+function utcToSwedish(isoStr) {
+  try {
+    const d = new Date(isoStr);
+    return d.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Stockholm' });
+  } catch(e) { return null; }
+}
+
+// ─── API HELPERS ──────────────────────────────────────────────────────────────
+const API = window.location.hostname === 'localhost' || window.location.protocol === 'http:'
+  ? ''   // same origin when served from FastAPI
+  : '';  // always same origin
+
+async function apiLoadParticipants() {
+  try {
+    const r = await fetch(API + '/api/participants');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    // Convert tips keys from strings to numbers for consistency
+    participants = data.map(p => ({
+      name: p.name,
+      tips: Object.fromEntries(Object.entries(p.tips).map(([k, v]) => [parseInt(k), v]))
+    }));
+    activeParticipant = Math.min(activeParticipant, participants.length - 1);
+    renderAll();
+  } catch(e) {
+    // Fallback: use Jesper's hardcoded tips if server unavailable
+    if (participants.length === 0) {
+      participants = [{ name: "Jesper", tips: Object.fromEntries(JESPER_TIPS.map(m => [m.match, { home: m.tip_home, away: m.tip_away }])) }];
+      renderAll();
+    }
+  }
+}
+
+// ─── SCORING ─────────────────────────────────────────────────────────────────
+function score(tip_home, tip_away, real_home, real_away) {
+  if (real_home === null || real_away === null) return null;
+  if (tip_home === real_home && tip_away === real_away) return 3;
+  const tipSign = Math.sign(tip_home - tip_away);
+  const realSign = Math.sign(real_home - real_away);
+  return tipSign === realSign ? 1 : 0;
+}
+
+function participantScore(p) {
+  let total = 0, exact = 0, sign = 0, played = 0;
+  for (const [mNum, tip] of Object.entries(p.tips)) {
+    const r = results[mNum];
+    if (!r || r.status !== 'done') continue;
+    played++;
+    const s = score(tip.home, tip.away, r.home, r.away);
+    if (s === 3) { total += 3; exact++; }
+    else if (s === 1) { total += 1; sign++; }
+  }
+  return { total, exact, sign, played };
+}
+
+// ─── API ──────────────────────────────────────────────────────────────────────
+async function fetchESPN(url) {
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error('HTTP ' + resp.status);
+  return resp.json();
+}
+
+async function loadSchedule() {
+  // Fetch all group stage dates to get kick-off times
+  const dates = [];
+  for (let d = 11; d <= 28; d++) dates.push(`20260${d < 10 ? '0'+d : d}`);
+  // ESPN accepts comma-separated dates or a range – try range
+  try {
+    const url = `https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard?dates=20260611-20260628&limit=100`;
+    const data = await fetchESPN(url);
+    processEvents(data.events || []);
+  } catch(e) {
+    // Fallback: fetch day by day (slower but reliable)
+    for (const d of dates) {
+      try {
+        const data = await fetchESPN(`https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard?dates=${d}`);
+        processEvents(data.events || []);
+      } catch(e2) {}
+    }
+  }
+  renderAll();
+}
+
+function processEvents(events) {
+  let found = 0;
+  events.forEach(ev => {
+    const comp = ev.competitions?.[0];
+    if (!comp) return;
+    const status = comp.status?.type?.name;
+    const home = comp.competitors?.find(c => c.homeAway === 'home');
+    const away = comp.competitors?.find(c => c.homeAway === 'away');
+    if (!home || !away) return;
+    const homeName = home.team?.shortDisplayName || home.team?.displayName || '';
+    const awayName = away.team?.shortDisplayName || away.team?.displayName || '';
+    const matchNum = findMatchByTeams(homeName, awayName);
+    if (!matchNum) return;
+    found++;
+
+    // Store kick-off time
+    const kickoff = utcToSwedish(ev.date);
+    if (kickoff) matchTimes[matchNum] = kickoff;
+
+    const homeScore = parseInt(home.score) || 0;
+    const awayScore = parseInt(away.score) || 0;
+    if (status === 'STATUS_FINAL') {
+      results[matchNum] = { home: homeScore, away: awayScore, status: 'done', minute: null };
+    } else if (status === 'STATUS_IN_PROGRESS') {
+      results[matchNum] = { home: homeScore, away: awayScore, status: 'live', minute: comp.status?.displayClock || '' };
+    } else {
+      if (!results[matchNum]) results[matchNum] = { home: null, away: null, status: 'upcoming', minute: null };
+    }
+  });
+  return found;
+}
+
+async function loadResults() {
+  document.getElementById('api-status').textContent = 'Uppdaterar…';
+  try {
+    const url = 'https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard';
+    const data = await fetchESPN(url);
+    const found = processEvents(data.events || []);
+    document.getElementById('api-status').textContent = found > 0 ? `${found} matcher uppdaterade` : 'VM ej startat ännu';
+  } catch(e) {
+    document.getElementById('api-status').textContent = 'API ej tillgängligt';
+  }
+  renderAll();
+}
+
+function findMatchByTeams(homeName, awayName) {
+  // Simple name matching – expand as needed
+  const norm = s => s.toLowerCase().replace(/[^a-z]/g,'');
+  const h = norm(homeName), a = norm(awayName);
+  for (const m of Object.values(MATCHES)) {
+    const parts = m.teams.split(' - ');
+    if (parts.length < 2) continue;
+    const mh = norm(parts[0]), ma = norm(parts[1]);
+    if ((mh.includes(h) || h.includes(mh)) && (ma.includes(a) || a.includes(ma))) return m.match;
+    if ((mh.includes(a) || a.includes(mh)) && (ma.includes(h) || h.includes(ma))) return m.match;
+  }
+  return null;
+}
+
+// Manual result entry (for offline use)
+window.setResult = function(matchNum, home, away) {
+  results[matchNum] = { home, away, status: 'done', minute: null };
+  renderAll();
+};
+
+// ─── RENDER ───────────────────────────────────────────────────────────────────
+function renderAll() {
+  renderTopStats();
+  renderLeaderboard();
+  renderMatches();
+  renderParticipant();
+}
+
+function renderTopStats() {
+  const p = participants[0];
+  const sc = participantScore(p);
+  const total72 = Object.values(results).filter(r => r.status === 'done').length;
+  const live = Object.values(results).filter(r => r.status === 'live').length;
+  document.getElementById('top-stats').innerHTML = `
+    <div class="stat-box"><div class="stat-val blue">${total72}</div><div class="stat-lab">Spelade matcher</div></div>
+    <div class="stat-box"><div class="stat-val ${live > 0 ? 'yellow' : 'muted'}">${live}</div><div class="stat-lab">Pågår nu</div></div>
+    <div class="stat-box"><div class="stat-val green">${sc.exact}</div><div class="stat-lab">Rätta resultat</div></div>
+    <div class="stat-box"><div class="stat-val yellow">${sc.sign}</div><div class="stat-lab">Rätta tecken</div></div>
+  `;
+}
+
+function renderLeaderboard() {
+  const ranked = participants.map(p => ({ name: p.name, ...participantScore(p) }))
+    .sort((a,b) => b.total - a.total || b.exact - a.exact);
+  const body = document.getElementById('leaderboard-body');
+  body.innerHTML = ranked.map((p, i) => {
+    const rankClass = i === 0 ? 'rank-1 r1' : i === 1 ? 'rank-2 r2' : i === 2 ? 'rank-3 r3' : 'rn';
+    const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : i+1;
+    return `<div class="lb-row rank-${Math.min(i+1,4)}">
+      <div class="rank ${rankClass}">${medal}</div>
+      <div class="lb-name" onclick="showParticipant(${participants.findIndex(x=>x.name===p.name)})">${p.name}</div>
+      <div class="lb-pts">${p.total}</div>
+      <div class="lb-exact">${p.exact}</div>
+      <div class="lb-sign">${p.sign}</div>
+      <div class="lb-trend" style="color:var(--muted)">${p.played}/72</div>
+    </div>`;
+  }).join('');
+}
+
+function renderMatches() {
+  const selPart = document.getElementById('match-participant-select');
+  // Populate select if needed
+  if (selPart.options.length !== participants.length) {
+    selPart.innerHTML = participants.map((p,i) => `<option value="${i}">${p.name}</option>`).join('');
+  }
+  const pIdx = parseInt(selPart.value) || 0;
+  const p = participants[pIdx];
+
+  const list = document.getElementById('match-list');
+  const filtered = Object.values(MATCHES).filter(m => {
+    const r = results[m.match];
+    const st = r ? r.status : 'upcoming';
+    if (matchFilter === 'spelade') return st === 'done';
+    if (matchFilter === 'live') return st === 'live';
+    if (matchFilter === 'kommande') return st === 'upcoming';
+    return true;
+  });
+
+  list.innerHTML = filtered.map(m => {
+    const r = results[m.match];
+    const tip = p.tips[m.match];
+    const st = r ? r.status : 'upcoming';
+    const pts = (r && st === 'done' && tip) ? score(tip.home, tip.away, r.home, r.away) : null;
+
+    let resultHTML = st === 'done'
+      ? `<div class="score-val">${r.home}–${r.away}</div>`
+      : st === 'live'
+        ? `<div class="score-val" style="color:var(--orange)">${r.home}–${r.away}</div>`
+        : `<div class="score-val" style="color:var(--muted)">–</div>`;
+
+    let tipClass = 'tip-pending', tipHTML = tip ? `${tip.home}–${tip.away}` : '?';
+    if (pts === 3) tipClass = 'tip-exact';
+    else if (pts === 1) tipClass = 'tip-sign';
+    else if (pts === 0) tipClass = 'tip-wrong';
+
+    let ptsHTML;
+    if (pts === 3) ptsHTML = `<div class="pts-pill pts-3">3p</div>`;
+    else if (pts === 1) ptsHTML = `<div class="pts-pill pts-1">1p</div>`;
+    else if (pts === 0) ptsHTML = `<div class="pts-pill pts-0">0p</div>`;
+    else ptsHTML = `<div class="pts-pill pts-pending">—</div>`;
+
+    const timeStr = matchTimes[m.match];
+    const meta = st === 'live'
+      ? `<span class="live-tag">● LIVE ${r.minute}</span> · Grupp ${m.group}`
+      : st === 'done'
+        ? `${m.date}${timeStr ? ' · <span class="time-tag">' + timeStr + '</span>' : ''} · Grupp ${m.group}`
+        : `${m.date}${timeStr ? ' · <span class="time-tag">' + timeStr + '</span>' : ''} · Grupp ${m.group} · ${m.tv}`;
+
+    return `<div class="match-card status-${st}">
+      <div class="match-num">${m.match}</div>
+      <div class="match-info">
+        <div class="teams">${m.teams}</div>
+        <div class="meta">${meta}</div>
+      </div>
+      <div class="score-box">${resultHTML}<div class="score-label">Resultat</div></div>
+      <div class="score-box"><div class="tip-val ${tipClass}">${tipHTML}</div><div class="score-label">Tips</div></div>
+      <div class="pts-badge">${ptsHTML}</div>
+    </div>`;
+  }).join('');
+}
+
+async function removeParticipant(idx) {
+  if (idx === 0) return;
+  const name = participants[idx].name;
+  if (!confirm(`Ta bort ${name}?`)) return;
+  const pwd = prompt('Adminlösenord:');
+  if (pwd === null) return;
+  try {
+    const r = await fetch(API + `/api/participants/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+      headers: { 'x-admin-password': pwd }
+    });
+    if (r.status === 401) { alert('Fel lösenord.'); return; }
+    if (!r.ok) { const j = await r.json(); throw new Error(j.detail || 'HTTP ' + r.status); }
+    await apiLoadParticipants();
+    activeParticipant = Math.min(activeParticipant, participants.length - 1);
+    renderAll();
+    showNotif(`${name} borttagen`);
+  } catch(e) {
+    alert('Kunde inte ta bort deltagaren: ' + e.message);
+  }
+}
+
+function renderParticipant() {
+  // P-tabs
+  document.getElementById('p-tabs').innerHTML = participants.map((p,i) =>
+    `<div style="display:flex;align-items:center;gap:2px;">
+      <button class="p-tab ${i===activeParticipant?'active':''}" onclick="showParticipant(${i})">${p.name}</button>
+      ${i > 0 ? `<button onclick="removeParticipant(${i})" title="Ta bort" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:13px;padding:2px 4px;line-height:1;" onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--muted)'">✕</button>` : ''}
+    </div>`
+  ).join('');
+
+  const p = participants[activeParticipant];
+  const sc = participantScore(p);
+
+  document.getElementById('p-stats').innerHTML = `
+    <div class="stat-box"><div class="stat-val blue">${sc.total}</div><div class="stat-lab">Totalt poäng</div></div>
+    <div class="stat-box"><div class="stat-val green">${sc.exact}</div><div class="stat-lab">Rätt resultat (3p)</div></div>
+    <div class="stat-box"><div class="stat-val yellow">${sc.sign}</div><div class="stat-lab">Rätt tecken (1p)</div></div>
+    <div class="stat-box"><div class="stat-val muted">${sc.played}</div><div class="stat-lab">Spelade</div></div>
+    <div class="stat-box"><div class="stat-val muted">${72-sc.played}</div><div class="stat-lab">Återstår</div></div>
+  `;
+
+  document.getElementById('mini-grid').innerHTML = Object.values(MATCHES).map(m => {
+    const tip = p.tips[m.match];
+    const r = results[m.match];
+    const pts = (r && r.status === 'done' && tip) ? score(tip.home, tip.away, r.home, r.away) : null;
+    const cls = pts === 3 ? 'g' : pts === 1 ? 'y' : pts === 0 ? 'r' : 'p';
+    const badge = pts === 3 ? ' ✓3p' : pts === 1 ? ' ~1p' : pts === 0 ? ' ✗' : '';
+    const tipStr = tip ? `${tip.home}–${tip.away}` : '?';
+    return `<div class="mini-card">
+      <div class="mini-match-num">${m.match}</div>
+      <div class="mini-teams">${m.teams}</div>
+      <span class="mini-tip ${cls}">${tipStr}<span class="mini-pts">${badge}</span></span>
+    </div>`;
+  }).join('');
+}
+
+// ─── ACTIONS ──────────────────────────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach((t,i) => {
+    t.classList.toggle('active', ['topplista','matcher','deltagare'][i] === name);
+  });
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById('view-' + name).classList.add('active');
+}
+
+function setFilter(f, btn) {
+  matchFilter = f;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderMatches();
+}
+
+function showParticipant(idx) {
+  activeParticipant = idx;
+  switchTab('deltagare');
+  renderParticipant();
+}
+
+function addParticipant() {
+  const name = document.getElementById('new-name').value.trim();
+  const raw = document.getElementById('new-tips').value.trim();
+  const errEl = document.getElementById('add-error');
+  errEl.textContent = '';
+  if (!name) { errEl.textContent = 'Ange ett namn.'; return; }
+  let tipArr;
+  try { tipArr = JSON.parse(raw); } catch(e) { errEl.textContent = 'Ogiltigt JSON.'; return; }
+  if (!Array.isArray(tipArr) || tipArr.length === 0) { errEl.textContent = 'Tom lista.'; return; }
+  const tipsMap = {};
+  tipArr.forEach(t => { tipsMap[t.match] = { home: t.tip_home, away: t.tip_away }; });
+  participants.push({ name, tips: tipsMap });
+  // Persist extra participants
+  try {
+    const extra = participants.slice(1);
+    localStorage.setItem('vm2026_participants', JSON.stringify(extra));
+  } catch(e) {}
+  document.getElementById('new-name').value = '';
+  document.getElementById('new-tips').value = '';
+  activeParticipant = participants.length - 1;
+  showNotif(`${name} tillagd!`);
+  renderAll();
+  switchTab('deltagare');
+}
+
+function showNotif(msg) {
+  const el = document.getElementById('notif');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+// ─── EXCEL UPLOAD ─────────────────────────────────────────────────────────────
+let pendingExcelTips = null;
+
+// DOM is already ready here (script is at bottom of body) — attach directly
+(function() {
+  const dropZone = document.getElementById('drop-zone');
+  const fileInput = document.getElementById('excel-input');
+
+  // File chosen via dialog
+  fileInput.addEventListener('change', function() {
+    if (this.files && this.files[0]) handleExcelFile(this.files[0]);
+  });
+
+  // Drag and drop
+  dropZone.addEventListener('dragover', function(e) { e.preventDefault(); this.style.borderColor = 'var(--blue)'; });
+  dropZone.addEventListener('dragleave', function() { this.style.borderColor = 'var(--border)'; });
+  dropZone.addEventListener('drop', function(e) {
+    e.preventDefault();
+    this.style.borderColor = 'var(--border)';
+    if (e.dataTransfer.files[0]) handleExcelFile(e.dataTransfer.files[0]);
+  });
+})();
+
+function handleExcelFile(file) {
+  const errEl = document.getElementById('add-error');
+  const label = document.getElementById('drop-label');
+  errEl.textContent = '';
+  if (!file.name.match(/\.xlsx?$/i)) { errEl.textContent = 'Välj en .xls eller .xlsx-fil.'; return; }
+
+  label.textContent = '⏳ Läser ' + file.name + '…';
+
+  if (!window.XLSX) {
+    // Try loading CDN one more time synchronously-ish
+    errEl.textContent = 'Laddar Excel-bibliotek…';
+    var s = document.createElement('script');
+    s.src = 'https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js';
+    s.onload = () => { errEl.textContent = ''; parseExcel(file); };
+    s.onerror = () => { errEl.textContent = 'Kunde inte ladda Excel-stöd. Kontrollera internetanslutningen.'; label.textContent = 'Klicka eller dra hit Excel-filen'; };
+    document.head.appendChild(s);
+    return;
+  }
+  parseExcel(file);
+}
+
+function parseExcel(file) {
+  const errEl = document.getElementById('add-error');
+  const label = document.getElementById('drop-label');
+
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const data = new Uint8Array(e.target.result);
+      const wb = XLSX.read(data, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+
+      const toNum = v => {
+        if (v === '' || v === null || v === undefined) return null;
+        const n = parseFloat(v);
+        return isNaN(n) ? null : n;
+      };
+
+      const tips = {};
+
+      // Fixed layout of the blankett:
+      // Rows 6-41 (0-indexed), left side: col 0 = match#, col 6 = home, col 7 = away
+      // Rows 6-41 (0-indexed), right side: col 13 = match#, col 19 = home, col 20 = away
+      for (let r = 6; r <= 41 && r < rows.length; r++) {
+        const row = rows[r] || [];
+
+        const n1 = toNum(row[0]);
+        if (n1 !== null && n1 >= 1 && n1 <= 36) {
+          const h = toNum(row[6]), a = toNum(row[7]);
+          if (h !== null && a !== null) tips[n1] = { home: h, away: a };
+        }
+
+        const n2 = toNum(row[13]);
+        if (n2 !== null && n2 >= 37 && n2 <= 72) {
+          const h = toNum(row[19]), a = toNum(row[20]);
+          if (h !== null && a !== null) tips[n2] = { home: h, away: a };
+        }
+      }
+
+      const count = Object.keys(tips).length;
+      if (count === 0) {
+        errEl.textContent = 'Hittade inga tips. Är mål ifyllda i kolumn G/H (match 1-36) och T/U (match 37-72)?';
+        label.textContent = 'Klicka eller dra hit Excel-filen';
+        return;
+      }
+
+      pendingExcelTips = tips;
+      label.textContent = `✓ ${file.name} — ${count} matcher inlästa`;
+      document.getElementById('excel-preview').textContent = `${count} matcher redo`;
+      document.getElementById('drop-zone').style.borderColor = 'var(--green)';
+      errEl.textContent = '';
+    } catch(ex) {
+      errEl.textContent = 'Fel vid läsning: ' + ex.message;
+      label.textContent = 'Klicka eller dra hit Excel-filen';
+    }
+  };
+  reader.onerror = () => { errEl.textContent = 'Kunde inte läsa filen.'; };
+  reader.readAsArrayBuffer(file);
+}
+
+async function addFromExcel() {
+  const name = document.getElementById('new-name').value.trim();
+  const errEl = document.getElementById('add-error');
+  const btn = document.getElementById('add-excel-btn');
+  errEl.textContent = '';
+  if (!name) { errEl.textContent = 'Ange ett namn på deltagaren.'; return; }
+
+  const fileInput = document.getElementById('excel-input');
+  if (!fileInput.files || !fileInput.files[0]) { errEl.textContent = 'Välj en Excel-fil först.'; return; }
+
+  btn.textContent = 'Laddar upp…';
+  btn.disabled = true;
+
+  try {
+    const formData = new FormData();
+    formData.append('name', name);
+    formData.append('file', fileInput.files[0]);
+
+    const r = await fetch(API + '/api/participants', { method: 'POST', body: formData });
+    const json = await r.json();
+    if (!r.ok) throw new Error(json.detail || 'HTTP ' + r.status);
+
+    // Reset form
+    document.getElementById('new-name').value = '';
+    document.getElementById('drop-label').textContent = 'Klicka eller dra hit Excel-filen';
+    document.getElementById('excel-preview').textContent = '';
+    document.getElementById('drop-zone').style.borderColor = 'var(--border)';
+    fileInput.value = '';
+    pendingExcelTips = null;
+
+    await apiLoadParticipants();
+    activeParticipant = participants.findIndex(p => p.name.toLowerCase() === name.toLowerCase());
+    if (activeParticipant < 0) activeParticipant = participants.length - 1;
+    showNotif(`${name} ${json.updated ? 'uppdaterad' : 'tillagd'}! 🎉`);
+    renderAll();
+    switchTab('deltagare');
+  } catch(e) {
+    errEl.textContent = 'Fel: ' + e.message;
+  } finally {
+    btn.textContent = 'Lägg till';
+    btn.disabled = false;
+  }
+}
+
+// ─── INIT ─────────────────────────────────────────────────────────────────────
+apiLoadParticipants();
+loadResults();
+// Auto-refresh every 60 seconds during a live match
+setInterval(() => {
+  const hasLive = Object.values(results).some(r => r.status === 'live');
+  if (hasLive) loadResults();
+}, 60000);
+</script>
+</body>
+</html>
