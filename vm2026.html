@@ -97,7 +97,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .participant-filter select { background: var(--panel); border: 1px solid var(--border); color: var(--text); font-size: 11px; padding: 4px 8px; border-radius: 6px; max-width: 120px; }
 
 .match-list { display: flex; flex-direction: column; gap: 6px; }
-.match-card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; display: grid; grid-template-columns: 28px 1fr 76px 76px 38px; align-items: center; gap: 8px; border-left: 3px solid var(--border); transition: background .1s; }
+.match-card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; display: grid; grid-template-columns: 28px 1fr 76px; align-items: center; gap: 8px; border-left: 3px solid var(--border); transition: background .1s; }
 .match-card:hover { background: #0f2040; }
 .match-card.status-done { border-left-color: var(--green); }
 .match-card.status-live { border-left-color: var(--orange); }
@@ -121,6 +121,16 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .pts-1 { background: rgba(251,191,36,.15); color: var(--yellow); border: 1px solid rgba(251,191,36,.3); }
 .pts-0 { background: rgba(239,68,68,.1); color: #7a3030; border: 1px solid #3a1a1a; }
 .pts-pending { background: transparent; color: var(--muted); border: 1px solid #1e3a5f; }
+.match-tips { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--border); }
+.tip-chip { display: flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 20px; font-size: 11px; font-weight: 700; border: 1px solid var(--border); background: rgba(255,255,255,.03); }
+.tip-chip-name { color: var(--muted); font-weight: 600; }
+.tip-chip-score { color: var(--text); }
+.tip-chip.chip-exact { border-color: rgba(74,222,128,.4); background: rgba(74,222,128,.07); }
+.tip-chip.chip-sign  { border-color: rgba(251,191,36,.4); background: rgba(251,191,36,.07); }
+.tip-chip.chip-wrong { border-color: rgba(239,68,68,.3); background: rgba(239,68,68,.05); }
+.tip-chip.chip-exact .tip-chip-score { color: var(--green); }
+.tip-chip.chip-sign  .tip-chip-score { color: var(--yellow); }
+.tip-chip.chip-wrong .tip-chip-score { color: var(--red); }
 
 /* PARTICIPANT VIEW */
 .p-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
@@ -160,7 +170,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 
   /* Match cards: stacked layout */
   .match-card {
-    grid-template-columns: 24px 1fr 60px 60px 32px;
+    grid-template-columns: 24px 1fr 60px;
     padding: 8px 10px;
     gap: 6px;
   }
@@ -236,10 +246,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
       <button class="filter-btn" onclick="setFilter('spelade',this)">Spelade</button>
       <button class="filter-btn" onclick="setFilter('live',this)">Live</button>
       <button class="filter-btn" onclick="setFilter('kommande',this)">Kommande</button>
-      <div class="participant-filter">
-        <label>Tips för:</label>
-        <select id="match-participant-select" onchange="renderMatches()"></select>
-      </div>
     </div>
     <div class="match-list" id="match-list"></div>
   </div>
@@ -473,14 +479,6 @@ function renderLeaderboard() {
 }
 
 function renderMatches() {
-  const selPart = document.getElementById('match-participant-select');
-  // Populate select if needed
-  if (selPart.options.length !== participants.length) {
-    selPart.innerHTML = participants.map((p,i) => `<option value="${i}">${p.name}</option>`).join('');
-  }
-  const pIdx = parseInt(selPart.value) || 0;
-  const p = participants[pIdx];
-
   const list = document.getElementById('match-list');
   const filtered = Object.values(MATCHES).filter(m => {
     const r = results[m.match];
@@ -493,26 +491,13 @@ function renderMatches() {
 
   list.innerHTML = filtered.map(m => {
     const r = results[m.match];
-    const tip = p.tips[m.match];
     const st = r ? r.status : 'upcoming';
-    const pts = (r && st === 'done' && tip) ? score(tip.home, tip.away, r.home, r.away) : null;
 
     let resultHTML = st === 'done'
       ? `<div class="score-val">${r.home}–${r.away}</div>`
       : st === 'live'
         ? `<div class="score-val" style="color:var(--orange)">${r.home}–${r.away}</div>`
         : `<div class="score-val" style="color:var(--muted)">–</div>`;
-
-    let tipClass = 'tip-pending', tipHTML = tip ? `${tip.home}–${tip.away}` : '?';
-    if (pts === 3) tipClass = 'tip-exact';
-    else if (pts === 1) tipClass = 'tip-sign';
-    else if (pts === 0) tipClass = 'tip-wrong';
-
-    let ptsHTML;
-    if (pts === 3) ptsHTML = `<div class="pts-pill pts-3">3p</div>`;
-    else if (pts === 1) ptsHTML = `<div class="pts-pill pts-1">1p</div>`;
-    else if (pts === 0) ptsHTML = `<div class="pts-pill pts-0">0p</div>`;
-    else ptsHTML = `<div class="pts-pill pts-pending">—</div>`;
 
     const timeStr = matchTimes[m.match];
     const meta = st === 'live'
@@ -521,6 +506,19 @@ function renderMatches() {
         ? `${m.date}${timeStr ? ' · <span class="time-tag">' + timeStr + '</span>' : ''} · Grupp ${m.group}`
         : `${m.date}${timeStr ? ' · <span class="time-tag">' + timeStr + '</span>' : ''} · Grupp ${m.group} · ${m.tv}`;
 
+    // All participants' tips
+    const chipsHTML = participants.map(p => {
+      const tip = p.tips[m.match];
+      if (!tip) return '';
+      const pts = (r && st === 'done') ? score(tip.home, tip.away, r.home, r.away) : null;
+      const chipClass = pts === 3 ? 'chip-exact' : pts === 1 ? 'chip-sign' : pts === 0 ? 'chip-wrong' : '';
+      const ptsBadge = pts !== null ? ` <span class="pts-pill pts-${pts === 3 ? '3' : pts === 1 ? '1' : '0'}">${pts}p</span>` : '';
+      return `<div class="tip-chip ${chipClass}">
+        <span class="tip-chip-name">${p.name}</span>
+        <span class="tip-chip-score">${tip.home}–${tip.away}</span>${ptsBadge}
+      </div>`;
+    }).join('');
+
     return `<div class="match-card status-${st}">
       <div class="match-num">${m.match}</div>
       <div class="match-info">
@@ -528,8 +526,7 @@ function renderMatches() {
         <div class="meta">${meta}</div>
       </div>
       <div class="score-box">${resultHTML}<div class="score-label">Resultat</div></div>
-      <div class="score-box"><div class="tip-val ${tipClass}">${tipHTML}</div><div class="score-label">Tips</div></div>
-      <div class="pts-badge">${ptsHTML}</div>
+      ${chipsHTML ? `<div class="match-tips">${chipsHTML}</div>` : ''}
     </div>`;
   }).join('');
 }
