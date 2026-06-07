@@ -99,7 +99,7 @@ def parse_tips_from_bytes(file_bytes: bytes, filename: str) -> dict:
                 if h is not None and a is not None:
                     tips[str(int(n2))] = {"home": int(h), "away": int(a)}
 
-    elif filename.lower().endswith(".xlsx"):
+    elif filename.lower().endswith((".xlsx", ".xlsm")):
         wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
         ws = wb.active
         for r in range(7, 43):
@@ -134,8 +134,8 @@ def get_participants():
 @app.post("/api/participants")
 async def add_participant(name: str = Form(...), file: UploadFile = Form(...)):
     filename = file.filename or ""
-    if not filename.lower().endswith((".xls", ".xlsx")):
-        raise HTTPException(400, "Endast .xls och .xlsx stöds")
+    if not filename.lower().endswith((".xls", ".xlsx", ".xlsm")):
+        raise HTTPException(400, "Endast .xls, .xlsx och .xlsm stöds")
 
     content = await file.read()
     tips = parse_tips_from_bytes(content, filename)
