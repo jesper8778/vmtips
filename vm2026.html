@@ -291,13 +291,6 @@ const MATCHES = Object.fromEntries(JESPER_TIPS.map(m => [m.match, m]));
 // Pre-populate match times from Excel data (CEST/Swedish time)
 const matchTimes = Object.fromEntries(JESPER_TIPS.filter(m => m.time).map(m => [m.match, m.time]));
 
-function utcToSwedish(isoStr) {
-  try {
-    const d = new Date(isoStr);
-    return d.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Stockholm' });
-  } catch(e) { return null; }
-}
-
 // ─── API HELPERS ──────────────────────────────────────────────────────────────
 const API = window.location.hostname === 'localhost' || window.location.protocol === 'http:'
   ? ''   // same origin when served from FastAPI
@@ -347,90 +340,29 @@ function participantScore(p) {
 }
 
 // ─── API ──────────────────────────────────────────────────────────────────────
-async function fetchESPN(url) {
-  const resp = await fetch(url);
-  if (!resp.ok) throw new Error('HTTP ' + resp.status);
-  return resp.json();
-}
-
-async function loadSchedule() {
-  // Fetch all group stage dates to get kick-off times
-  const dates = [];
-  for (let d = 11; d <= 28; d++) dates.push(`20260${d < 10 ? '0'+d : d}`);
-  // ESPN accepts comma-separated dates or a range – try range
-  try {
-    const url = `https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard?dates=20260611-20260628&limit=100`;
-    const data = await fetchESPN(url);
-    processEvents(data.events || []);
-  } catch(e) {
-    // Fallback: fetch day by day (slower but reliable)
-    for (const d of dates) {
-      try {
-        const data = await fetchESPN(`https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard?dates=${d}`);
-        processEvents(data.events || []);
-      } catch(e2) {}
-    }
-  }
-  renderAll();
-}
-
-function processEvents(events) {
-  let found = 0;
-  events.forEach(ev => {
-    const comp = ev.competitions?.[0];
-    if (!comp) return;
-    const status = comp.status?.type?.name;
-    const home = comp.competitors?.find(c => c.homeAway === 'home');
-    const away = comp.competitors?.find(c => c.homeAway === 'away');
-    if (!home || !away) return;
-    const homeName = home.team?.shortDisplayName || home.team?.displayName || '';
-    const awayName = away.team?.shortDisplayName || away.team?.displayName || '';
-    const matchNum = findMatchByTeams(homeName, awayName);
-    if (!matchNum) return;
-    found++;
-
-    // Store kick-off time
-    const kickoff = utcToSwedish(ev.date);
-    if (kickoff) matchTimes[matchNum] = kickoff;
-
-    const homeScore = parseInt(home.score) || 0;
-    const awayScore = parseInt(away.score) || 0;
-    if (status === 'STATUS_FINAL') {
-      results[matchNum] = { home: homeScore, away: awayScore, status: 'done', minute: null };
-    } else if (status === 'STATUS_IN_PROGRESS') {
-      results[matchNum] = { home: homeScore, away: awayScore, status: 'live', minute: comp.status?.displayClock || '' };
-    } else {
-      if (!results[matchNum]) results[matchNum] = { home: null, away: null, status: 'upcoming', minute: null };
-    }
-  });
-  return found;
-}
-
 async function loadResults() {
   document.getElementById('api-status').textContent = 'Uppdaterar…';
   try {
-    const url = 'https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard';
-    const data = await fetchESPN(url);
-    const found = processEvents(data.events || []);
-    document.getElementById('api-status').textContent = found > 0 ? `${found} matcher uppdaterade` : 'VM ej startat ännu';
+    const data = await fetch(API + '/api/results').then(r => r.json());
+    let found = 0;
+    for (const [matchNum, r] of Object.entries(data)) {
+      const num = parseInt(matchNum);
+      if (r.kickoff) matchTimes[num] = r.kickoff;
+      if (r.status === 'done') {
+        results[num] = { home: r.home_score, away: r.away_score, status: 'done', minute: null };
+        found++;
+      } else if (r.status === 'live') {
+        results[num] = { home: r.home_score, away: r.away_score, status: 'live', minute: r.minute || '' };
+        found++;
+      } else {
+        if (!results[num]) results[num] = { home: null, away: null, status: 'upcoming', minute: null };
+      }
+    }
+    document.getElementById('api-status').textContent = found > 0 ? `${found} matcher klara` : 'VM ej startat ännu';
   } catch(e) {
-    document.getElementById('api-status').textContent = 'API ej tillgängligt';
+    document.getElementById('api-status').textContent = 'Kunde inte hämta resultat';
   }
   renderAll();
-}
-
-function findMatchByTeams(homeName, awayName) {
-  // Simple name matching – expand as needed
-  const norm = s => s.toLowerCase().replace(/[^a-z]/g,'');
-  const h = norm(homeName), a = norm(awayName);
-  for (const m of Object.values(MATCHES)) {
-    const parts = m.teams.split(' - ');
-    if (parts.length < 2) continue;
-    const mh = norm(parts[0]), ma = norm(parts[1]);
-    if ((mh.includes(h) || h.includes(mh)) && (ma.includes(a) || a.includes(ma))) return m.match;
-    if ((mh.includes(a) || a.includes(mh)) && (ma.includes(h) || h.includes(ma))) return m.match;
-  }
-  return null;
 }
 
 // Manual result entry (for offline use)
@@ -793,11 +725,8 @@ async function addFromExcel() {
 // ─── INIT ─────────────────────────────────────────────────────────────────────
 apiLoadParticipants();
 loadResults();
-// Auto-refresh every 60 seconds during a live match
-setInterval(() => {
-  const hasLive = Object.values(results).some(r => r.status === 'live');
-  if (hasLive) loadResults();
-}, 60000);
+// Poll server every 60 seconds (server handles ESPN, we just read DB)
+setInterval(loadResults, 60000);
 </script>
 </body>
 </html>
