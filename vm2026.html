@@ -5,6 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>VM 2026 Tipset</title>
 <script>
+// Load Chart.js from CDN
+(function() {
+  var s = document.createElement('script');
+  s.src = 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js';
+  s.onload = function() { if (typeof renderChart === 'function') renderChart(); };
+  document.head.appendChild(s);
+})();
 // Load SheetJS – try local first, fall back to CDN
 (function() {
   function loadCDN() {
@@ -195,6 +202,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .add-btn:hover { background: #2563eb; }
 .error-msg { color: var(--red); font-size: 11px; margin-top: 6px; }
 
+/* CHART */
+.chart-section { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-top: 14px; }
+.chart-section canvas { max-height: 260px; }
+
 /* SPINNER */
 .spinner { display: flex; align-items: center; justify-content: center; padding: 40px; color: var(--muted); font-size: 13px; gap: 10px; }
 
@@ -229,7 +240,11 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
   <!-- TOPPLISTA -->
   <div class="view active" id="view-topplista">
     <div class="stats-row" id="top-stats"></div>
-    <div class="section-label">Ställning</div>
+    <div class="chart-section">
+      <div class="section-label" style="margin-bottom:12px">📈 Poäng över tid</div>
+      <canvas id="points-chart"></canvas>
+    </div>
+    <div class="section-label" style="margin-top:14px">Ställning</div>
     <div class="lb">
       <div class="lb-head">
         <span>#</span><span>Deltagare</span><span style="text-align:right">Poäng</span>
@@ -374,9 +389,91 @@ window.setResult = function(matchNum, home, away) {
 // ─── RENDER ───────────────────────────────────────────────────────────────────
 function renderAll() {
   renderTopStats();
+  renderChart();
   renderLeaderboard();
   renderMatches();
   renderParticipant();
+}
+
+let _chart = null;
+const CHART_COLORS = ['#60a5fa','#4ade80','#fbbf24','#f97316','#a78bfa','#f472b6','#34d399','#fb923c'];
+
+function renderChart() {
+  if (typeof Chart === 'undefined') return; // Chart.js not yet loaded
+
+  // Collect matches in order that have results
+  const playedMatches = [];
+  for (let i = 1; i <= 72; i++) {
+    const r = results[i];
+    if (r && r.status === 'done') playedMatches.push(i);
+  }
+  if (playedMatches.length === 0) return;
+
+  const labels = playedMatches.map(n => 'M' + n);
+
+  const datasets = participants.map((p, idx) => {
+    let cum = 0;
+    const data = playedMatches.map(mNum => {
+      const tip = p.tips[mNum];
+      const r = results[mNum];
+      if (tip && r) {
+        const s = score(tip.home, tip.away, r.home, r.away);
+        if (s !== null) cum += s;
+      }
+      return cum;
+    });
+    return {
+      label: p.name,
+      data,
+      borderColor: CHART_COLORS[idx % CHART_COLORS.length],
+      backgroundColor: 'transparent',
+      borderWidth: 2,
+      pointRadius: playedMatches.length <= 20 ? 3 : 0,
+      pointHoverRadius: 5,
+      tension: 0.3
+    };
+  });
+
+  const canvas = document.getElementById('points-chart');
+  if (!canvas) return;
+
+  if (_chart) { _chart.destroy(); _chart = null; }
+
+  _chart = new Chart(canvas, {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          labels: { color: '#94a3b8', font: { size: 11 }, boxWidth: 12 }
+        },
+        tooltip: {
+          backgroundColor: '#0d1f3c',
+          borderColor: '#1e3a5f',
+          borderWidth: 1,
+          titleColor: '#e2e8f0',
+          bodyColor: '#94a3b8',
+          callbacks: {
+            label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y}p`
+          }
+        }
+      },
+      scales: {
+        x: {
+          ticks: { color: '#4a6a99', font: { size: 10 }, maxTicksLimit: 18 },
+          grid: { color: '#1e3a5f' }
+        },
+        y: {
+          ticks: { color: '#4a6a99', font: { size: 10 } },
+          grid: { color: '#1e3a5f' },
+          beginAtZero: true
+        }
+      }
+    }
+  });
 }
 
 function renderTopStats() {
